@@ -42,7 +42,7 @@ Given a query that matches no listings, the agent stops before calling
 
 ---
 
-## 3. Something about state
+## 3. The selected item stays the same between tools
 
 <!-- YOU WRITE THIS ONE.
 
@@ -54,15 +54,20 @@ Given a query that matches no listings, the agent stops before calling
      compares session["selected_item"] against what actually reached
      suggest_outfit is the shape you're after. -->
 
-
+For at least 4 of 5 successful searches, the item stored in
+`session["selected_item"]` has the same `id` as the `new_item` passed to
+`suggest_outfit`.
 
 **Why this target:**
-
+I picked 4 out of 5 because state should stay consistent almost all the time, but
+I want to allow one failure while testing the loop. A lower target would make it
+too easy to miss a state bug where the agent searches for one item but styles a
+different one.
 
 
 ---
 
-## 4. Something about the fit card
+## 4. Fit cards include the required item details
 
 <!-- YOU WRITE THIS ONE.
 
@@ -75,15 +80,19 @@ Given a query that matches no listings, the agent stops before calling
      sentence? A card longer than a caption anyone would post? Any of those can
      be turned into a number. -->
 
-
+In at least 4 of 5 generated fit cards, the caption mentions the selected item's
+price and platform and stays within 2 to 4 sentences.
 
 **Why this target:**
-
+The wording can vary because the fit card is model-generated, so I do not expect
+the exact same output every time. I care more that the caption consistently
+includes the details needed to identify the find and still reads like a short
+post rather than a long product description.
 
 
 ---
 
-## 5. Your choice
+## 5. Search respects the maximum price
 
 <!-- YOU WRITE THIS ONE TOO.
 
@@ -92,11 +101,14 @@ Given a query that matches no listings, the agent stops before calling
      search respects a price ceiling — anything, as long as it names a number
      or an observable outcome. -->
 
-
+For 5 of 5 queries that include a `max_price`, every listing returned by
+`search_listings` has a price less than or equal to that maximum.
 
 **Why this target:**
 
-
+I chose 5 out of 5 because the price filter is deterministic and does not depend
+on the model. Returning even one item above the user's stated budget would mean
+the search tool is not following one of its explicit inputs.
 
 ---
 

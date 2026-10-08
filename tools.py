@@ -20,12 +20,39 @@ That last line is what your loop branches on. "Returns a list" earns nothing —
 the description has to say what is *in* the list.
 """
 
+import re
 import config  # noqa: F401 — you'll use this in search_listings
 from generate import generate
 from utils.data_loader import load_listings
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower()))
+
+
+def _size_matches(requested_size: str, listing_size: str) -> bool:
+    """
+    Match sizes case-insensitively without unsafe substring matching.
+
+    Examples:
+      "M" matches "M" and "S/M"
+      "S" does not match "US 9"
+      "L" does not match "XL"
+    """
+    requested = requested_size.strip().lower()
+
+    listing_parts = {
+        part.strip().lower()
+        for part in re.split(r"[/,]", listing_size)
+        if part.strip()
+    }
+
+    return requested in listing_parts
 
 def search_listings(
     description: str,
@@ -79,7 +106,48 @@ def search_listings(
         python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
     """
     # TODO: replace this with your implementation
-    return []
+    listings = load_listings()
+    query_tokens = _tokenize(description)
+
+    scored: list[tuple[int, dict]] = []
+
+    for listing in listings:
+        # Price filter
+        if max_price is not None and listing["price"] > max_price:
+            continue
+
+        # Size filter
+        if size is not None and not _size_matches(size, listing["size"]):
+            continue
+
+        # Build searchable text from relevant listing fields
+        searchable_text = " ".join(
+            [
+                listing.get("title", ""),
+                listing.get("description", ""),
+                listing.get("category", ""),
+                " ".join(listing.get("style_tags", [])),
+                " ".join(listing.get("colors", [])),
+                listing.get("brand") or "",
+            ]
+        )
+
+        listing_tokens = _tokenize(searchable_text)
+
+        # Keyword overlap score
+        score = len(query_tokens & listing_tokens)
+
+        if score == 0:
+            continue
+
+        scored.append((score, listing))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    return [
+        listing
+        for _, listing in scored[: config.SEARCH_RESULT_LIMIT]
+    ]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -113,7 +181,56 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
         python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
     """
     # TODO: replace this with your implementation
-    return ""
+    items = wardrobe.get("items", [])
+
+    item_details = (
+        f"New item: {new_item['title']}\n"
+        f"Description: {new_item['description']}\n"
+        f"Category: {new_item['category']}\n"
+        f"Colors: {', '.join(new_item['colors'])}\n"
+        f"Style tags: {', '.join(new_item['style_tags'])}\n"
+        f"Condition: {new_item['condition']}\n"
+    )
+
+    if not items:
+        prompt = f"""
+        You are helping someone style a thrifted item.
+
+        {item_details}
+
+        The user's wardrobe is empty, so suggest one or two general outfit ideas using
+        types of clothing, shoes, or accessories that would pair well with this item.
+
+        Keep the response concise and practical.
+    """
+    else:
+        wardrobe_text = "\n".join(
+            (
+                f"- {item['name']} "
+                f"(category: {item['category']}; "
+                f"colors: {', '.join(item['colors'])}; "
+                f"style: {', '.join(item['style_tags'])}; "
+                f"notes: {item['notes']})"
+            )
+            for item in items
+        )
+
+        prompt = f"""
+        You are helping someone style a thrifted item using pieces they already own.
+
+        {item_details}
+
+        Wardrobe:
+        {wardrobe_text}
+
+        Suggest one or two outfits using the new item and specific pieces from the
+        wardrobe above. Refer to the wardrobe pieces by name. Do not invent wardrobe
+        items that are not listed.
+
+        Keep the response concise and practical.
+        """
+
+    return generate(prompt)
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -153,4 +270,31 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
     """
     # TODO: replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "I couldn't create a fit card because no outfit suggestion was provided."
+
+    prompt = f"""
+                Write a short social-media-style caption for this thrifted find.
+
+                Item:
+                - Title: {new_item['title']}
+                - Price: ${new_item['price']:.2f}
+                - Platform: {new_item['platform']}
+                - Colors: {', '.join(new_item['colors'])}
+                - Style tags: {', '.join(new_item['style_tags'])}
+
+                Outfit idea:
+                {outfit}
+
+                Requirements:
+                - Write 2 to 4 sentences.
+                - Make it sound like a real post, not a product description. 
+                - Don't be cheesy. Don't sound too advertising. Sounds like a human writing it.
+                - Mention the item once.
+                - Mention the price once.
+                - Mention the platform once.
+                - Be specific about the overall vibe of the outfit.
+                - Do not add hashtags unless they are naturally useful.
+                """
+
+    return generate(prompt)
