@@ -12,11 +12,58 @@ Build and test your three tools in `tools.py` first. Then come here.
 
     python agent.py          runs both example paths below
 """
-
+import re
 import config
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
+
+def _parse_query(query: str) -> dict:
+    """
+    Parse a user query into description, size, and max_price.
+    """
+    text = query.strip()
+
+    size = None
+    max_price = None
+
+    # Examples: "under $30", "under 30", "max $30"
+    price_match = re.search(
+        r"\b(?:under|max(?:imum)?)\s*\$?(\d+(?:\.\d{1,2})?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if price_match:
+        max_price = float(price_match.group(1))
+        text = text.replace(price_match.group(0), "")
+
+    # Examples: "size M", "size XXS", "size W30"
+    size_match = re.search(
+        r"\bsize\s+([A-Za-z0-9/]+)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if size_match:
+        size = size_match.group(1)
+        text = text.replace(size_match.group(0), "")
+
+    # Remove common request wording.
+    text = re.sub(
+        r"^(?:i'?m\s+)?(?:looking for|find me|find|show me|search for)\s+(?:a\s+|an\s+)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    description = " ".join(text.split()).strip(" ,")
+
+    return {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -105,10 +152,54 @@ def run_agent(query: str, wardrobe: dict) -> dict:
       • A handler for ModelUnavailable, so a bad key produces a message rather
         than a stack trace. The import is already at the top of this file.
     """
+    # TODO: delete these two lines and build the loop.
     session = new_session(query, wardrobe)
 
-    # TODO: delete these two lines and build the loop.
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    step = "parse"
+    iteration = 0
+
+    while step != "done":
+        iteration += 1
+        trace.check_iterations(iteration)
+
+        if step == "parse":
+            session["parsed"] = _parse_query(session["query"])
+            step = "search"
+
+        elif step == "search":
+            parsed = session["parsed"]
+
+            session["search_results"] = search_listings(
+                description=parsed["description"],
+                size=parsed["size"],
+                max_price=parsed["max_price"],
+            )
+
+            # This is the important branch.
+            if not session["search_results"]:
+                session["error"] = (
+                    "I couldn't find a matching item. Try changing the "
+                    "description, size, or maximum price."
+                )
+                return session
+
+            session["selected_item"] = session["search_results"][0]
+            step = "suggest"
+
+        elif step == "suggest":
+            session["outfit_suggestion"] = suggest_outfit(
+                session["selected_item"],
+                session["wardrobe"],
+            )
+            step = "fit_card"
+
+        elif step == "fit_card":
+            session["fit_card"] = create_fit_card(
+                session["outfit_suggestion"],
+                session["selected_item"],
+            )
+            step = "done"
+
     return session
 
 

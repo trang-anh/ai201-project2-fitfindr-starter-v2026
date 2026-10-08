@@ -40,6 +40,7 @@
 ## What This Does
 
 <!-- Three or four sentences: what a user asks for, and what they get back. -->
+FitFindr takes a natural-language request for a thrifted clothing item, such as a style, size, and maximum price. It searches the available listings for matching items and selects one result. It then uses the user's wardrobe to suggest one or two outfits and generates a short fit-card caption for the selected item. If no listing matches, the agent stops early and tells the user what they can change in their search.
 
 
 
@@ -94,22 +95,16 @@
      function have to be real. -->
 
 **Branch rule:**
-If `search_listings` returns an empty list, add a message to the session saying
-that no matching listings were found and stop. Otherwise, take the first listing,
-pass it to `suggest_outfit`, then pass the outfit suggestion and the same listing
-to `create_fit_card`.
+If `search_listings` returns an empty list, the agent stores an error message telling the user to change the description, size, or maximum price and stops before calling `suggest_outfit`. Otherwise, it selects the first result, stores it in the session, passes that stored item to `suggest_outfit`, then passes the stored outfit suggestion and selected item to `create_fit_card`.
 
 **Where it lives:** `agent.py::run_agent`
 
 **How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
-The query is parsed with regular expressions. The parser looks for an optional size ... phrase and an optional price phrase such as under $30, removes those from the query, and uses the remaining text as the listing description.
+The query is parsed with regular expressions. The parser extracts an optional `size` and `max_price`, removes those phrases and common request wording, and uses the remaining text as the listing description.
 
 **What moves through the session:** <!-- which fields, in what order -->
-The session starts with the user's query. The parsed `description`, `size`, and
-`max_price` are passed to `search_listings`. If a listing is found, the selected
-listing is stored and passed with the user's wardrobe to `suggest_outfit`. The
-returned outfit suggestion is then passed with the same listing to
-`create_fit_card`, and the final caption is added to the session.
+The parsed query is stored in `session["parsed"]`, search results go into `session["search_results"]`, the
+first result becomes `session["selected_item"]`, the outfit goes into `session["outfit_suggestion"]`, and the final caption goes into `session["fit_card"]`.
 
 ---
 
@@ -124,7 +119,29 @@ returned outfit suggestion is then passed with the same listing to
 
 ```
 $ python app.py ask 'find me a vintage graphic tee size L under $30'
+```
+```
+Found:    Graphic Tee — 2003 Tour Bootleg Style — $24.0 on depop
 
+  Outfit:   Here are two ways to style your new 2003 tour graphic tee using pieces from your wardrobe:
+
+**1. 90s Grunge Streetwear**
+*   **Bottoms:** Baggy straight-leg jeans
+*   **Outerwear:** Vintage black denim jacket (worn over the tee)
+*   **Shoes:** Black combat boots
+*   **Accessories:** Black crossbody bag
+*   *Why it works:* This leans into the vintage, worn-in grunge aesthetic of the bootleg tee. The baggy dark wash denim and chunky combat boots create an effortless, edgy streetwear silhouette.
+
+**2. Contrast Layering**
+*   **Bottoms:** Wide-leg khaki trousers
+*   **Layering (Inner):** White ribbed tank top (worn layered underneath the tee, letting the white hem peek out)
+*   **Shoes:** Chunky white sneakers
+*   **Accessories:** Brown leather belt, Black crossbody bag
+*   *Why it works:* Pairing the black graphic tee with tan trousers grounds the look with earth tones. Layering the white tank underneath adds depth, while the chunky white sneakers tie the whole casual, minimal-streetwear outfit together.
+
+  Fit card: Just listed this faded 2003 tour graphic tee on my depop for $24. It’s got that perfect lived-in feel, so I’ve been wearing it either thrown under an oversized denim jacket with combat boots for full 90s grunge, or layered over a white tank with khaki trousers for an easy streetwear look.
+
+2 model calls this session, 900 prompt + 316 output tokens
 ```
 
 **The three tools, tested one at a time**
@@ -217,15 +234,15 @@ I couldn't create a fit card because no outfit suggestion was provided.
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- **What I asked for:** I asked Claude how to implement `search_listings` from the provided tool contract, especially how to handle size matching without using unsafe substring checks.
+- **What came back:** It suggested filtering by price and size first, scoring the remaining listings by keyword overlap, and using a size helper that treats values like `S/M` as separate size options instead of checking plain substrings.
+- **What I changed:** I used that structure, but kept the implementation deterministic and matched it to the actual listing fields in the dataset. I also kept the required behavior of returning `[]` when nothing matches.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- **What I asked for:** I asked Claude how to wire the three tools into the planning loop while following the requirement that values move through the session state.
+- **What came back:** It suggested storing the parsed query, search results, selected item, outfit suggestion, and fit card in `session`, and branching immediately if `search_listings` returns an empty list.
+- **What I changed:** I used the session as the source of truth between steps instead of passing local variables directly from one tool to the next. I also made the no-results branch return a useful message telling the user to change the description, size, or maximum price.
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
